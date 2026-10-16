@@ -23,7 +23,8 @@ uv run ruff check .
 
 | Переменная | Назначение |
 |---|---|
-| `DATABASE_URL` | PostgreSQL, он же брокер Celery |
+| `DATABASE_URL` | PostgreSQL для локальной работы и CI, он же брокер Celery |
+| `POSTGRES_CONNECTION_STRING` или `POSTGRES_DATABASE_NAME`, `POSTGRES_USERNAME`, `POSTGRES_PASSWORD`, `POSTGRES_HOST`, `POSTGRES_PORT` | то же самое, переменные платформы |
 | `SECRET_KEY` | секрет Django (в проде обязателен) |
 | `EVENTS_PROVIDER_URL` | для кластера: `http://student-system-events-provider-web.student-system-events-provider.svc:8000` |
 | `EVENTS_PROVIDER_API_KEY` | ключ из профиля LMS (хранить в GitHub Secrets) |

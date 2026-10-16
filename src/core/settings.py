@@ -49,17 +49,22 @@ APPEND_SLASH = False
 
 
 def _database_config():
-    url = os.environ.get("DATABASE_URL")
+    # DATABASE_URL is for local work and CI, the POSTGRES_* names are the ones
+    # the deployment platform injects into the container.
+    url = os.environ.get("DATABASE_URL") or os.environ.get(
+        "POSTGRES_CONNECTION_STRING"
+    )
     if url:
         return dj_database_url.parse(url, conn_max_age=60)
-    if os.environ.get("POSTGRES_DB"):
+    if os.environ.get("POSTGRES_DATABASE_NAME"):
         return {
             "ENGINE": "django.db.backends.postgresql",
-            "NAME": os.environ["POSTGRES_DB"],
-            "USER": os.environ.get("POSTGRES_USER", "postgres"),
+            "NAME": os.environ["POSTGRES_DATABASE_NAME"],
+            "USER": os.environ.get("POSTGRES_USERNAME", "postgres"),
             "PASSWORD": os.environ.get("POSTGRES_PASSWORD", ""),
             "HOST": os.environ.get("POSTGRES_HOST", "localhost"),
             "PORT": os.environ.get("POSTGRES_PORT", "5432"),
+            "CONN_MAX_AGE": 60,
         }
     return {
         "ENGINE": "django.db.backends.sqlite3",
@@ -114,7 +119,8 @@ def _broker_url(db):
         host = db.get("HOST") or "localhost"
         port = db.get("PORT") or 5432
         driver = "psycopg2" if find_spec("psycopg2") else "psycopg"
-        return f"sqla+postgresql+{driver}://{user}:{password}@{host}:{port}/{db['NAME']}"
+        auth = f"{user}:{password}"
+        return f"sqla+postgresql+{driver}://{auth}@{host}:{port}/{db['NAME']}"
     return "memory://"  # local sqlite / tests
 
 
