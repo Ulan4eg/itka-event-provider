@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
 
 
 def get_client():
+    if not settings.EVENTS_PROVIDER_API_KEY:
+        logger.warning("EVENTS_PROVIDER_API_KEY is empty, the provider will answer 401")
     return EventsProviderClient(
         base_url=settings.EVENTS_PROVIDER_URL,
         api_key=settings.EVENTS_PROVIDER_API_KEY,
