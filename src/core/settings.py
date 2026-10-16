@@ -7,9 +7,6 @@ from urllib.parse import quote
 
 import dj_database_url
 from celery.schedules import crontab
-from dotenv import load_dotenv
-
-load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
@@ -100,12 +97,18 @@ REST_FRAMEWORK = {
 }
 
 # --- Events Provider API ---------------------------------------------------
+# The public provider address is not reachable from inside the cluster, so the
+# default is the in-cluster one. Locally set EVENTS_PROVIDER_URL to the public one.
 EVENTS_PROVIDER_URL = os.environ.get(
-    "EVENTS_PROVIDER_URL", "http://events-provider.dev-2.python-labs.ru"
+    "EVENTS_PROVIDER_URL",
+    "http://student-system-events-provider-web.student-system-events-provider.svc"
+    ":8000",
 )
 EVENTS_PROVIDER_API_KEY = os.environ.get("EVENTS_PROVIDER_API_KEY", "")
 EVENTS_PROVIDER_TIMEOUT = float(os.environ.get("EVENTS_PROVIDER_TIMEOUT", "10"))
 SEATS_CACHE_TTL = 30  # seconds
+# How long POST /api/sync/trigger waits for the sync to finish (seconds).
+SYNC_TRIGGER_WAIT = float(os.environ.get("SYNC_TRIGGER_WAIT", "20"))
 
 
 # --- Celery (PostgreSQL is used as the broker via the SQLAlchemy transport) --

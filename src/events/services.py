@@ -42,7 +42,7 @@ def translated_provider_errors():
         raise NotFoundError(str(exc)) from exc
     except ProviderError as exc:
         logger.error("Events Provider error: %s", exc)
-        raise UpstreamError(f"Events Provider error: {exc}") from exc
+        raise UpstreamError() from exc
 
 
 def list_events(date_from=None):

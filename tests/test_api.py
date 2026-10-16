@@ -44,7 +44,7 @@ def test_sync_trigger(api):
         response = api.post("/api/sync/trigger")
 
     assert response.status_code == 200
-    trigger.assert_called_once_with()
+    trigger.assert_called_once()
 
 
 def test_event_list_pagination_and_shape(api, make_event):

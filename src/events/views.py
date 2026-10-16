@@ -1,3 +1,4 @@
+from django.conf import settings
 from rest_framework import status
 from rest_framework.generics import ListAPIView
 from rest_framework.pagination import PageNumberPagination
@@ -27,7 +28,7 @@ class HealthView(APIView):
 
 class SyncTriggerView(APIView):
     def post(self, request):
-        trigger_sync()
+        trigger_sync(wait=settings.SYNC_TRIGGER_WAIT)
         return Response({"status": "started"})
 
 
