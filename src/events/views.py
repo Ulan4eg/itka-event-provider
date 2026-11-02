@@ -6,6 +6,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from . import services
+from .exceptions import NotFoundError
 from .serializers import (
     EventDetailSerializer,
     EventFilterSerializer,
@@ -24,6 +25,18 @@ class EventPagination(PageNumberPagination):
 class HealthView(APIView):
     def get(self, request):
         return Response({"status": "ok"})
+
+
+class SentryDebugView(APIView):
+    """Raises an unhandled error to check the GlitchTip integration.
+
+    Disabled (404) unless SENTRY_DEBUG_ENDPOINT is true.
+    """
+
+    def get(self, request):
+        if not settings.SENTRY_DEBUG_ENDPOINT:
+            raise NotFoundError()
+        raise RuntimeError("GlitchTip integration test error")
 
 
 class SyncTriggerView(APIView):
@@ -58,6 +71,7 @@ class TicketCreateView(APIView):
     def post(self, request):
         serializer = TicketCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        # validated_data holds idempotency_key only if the client sent it.
         ticket = services.register_ticket(**serializer.validated_data)
         return Response(
             {"ticket_id": str(ticket.ticket_id)}, status=status.HTTP_201_CREATED

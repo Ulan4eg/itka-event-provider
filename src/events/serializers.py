@@ -50,3 +50,5 @@ class TicketCreateSerializer(serializers.Serializer):
         max_length=16,
         error_messages={"invalid": "Seat must look like A15."},
     )
+    # Optional: a retry with the same key never creates a second ticket.
+    idempotency_key = serializers.CharField(max_length=255, required=False)

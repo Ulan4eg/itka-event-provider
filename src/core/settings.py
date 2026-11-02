@@ -8,6 +8,8 @@ from urllib.parse import quote
 import dj_database_url
 from celery.schedules import crontab
 
+from src.core.observability import init_sentry
+
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 
@@ -110,6 +112,31 @@ SEATS_CACHE_TTL = 30  # seconds
 # How long POST /api/sync/trigger waits for the sync to finish (seconds).
 SYNC_TRIGGER_WAIT = float(os.environ.get("SYNC_TRIGGER_WAIT", "20"))
 
+# --- Capashino (notification service) -----------------------------------------
+# From inside the cluster use the internal host (default); locally set
+# CAPASHINO_URL=https://capashino.dev-2.python-labs.ru.
+CAPASHINO_URL = os.environ.get(
+    "CAPASHINO_URL",
+    "http://student-system-capashino-web.student-system-capashino.svc:8000",
+)
+# Token from the portal profile page, sent as X-API-Key. Never commit it.
+CAPASHINO_API_TOKEN = os.environ.get("CAPASHINO_API_TOKEN", "")
+CAPASHINO_TIMEOUT = float(os.environ.get("CAPASHINO_TIMEOUT", "10"))
+
+# --- Transactional outbox worker ------------------------------------------------
+# The worker runs as a coroutine inside the web process (see gunicorn.conf.py).
+OUTBOX_WORKER_ENABLED = env_bool("OUTBOX_WORKER_ENABLED", True)
+OUTBOX_POLL_INTERVAL = float(os.environ.get("OUTBOX_POLL_INTERVAL", "2"))  # seconds
+OUTBOX_BATCH_SIZE = int(os.environ.get("OUTBOX_BATCH_SIZE", "10"))
+# After this many failed attempts the message gets the "failed" status.
+OUTBOX_MAX_ATTEMPTS = int(os.environ.get("OUTBOX_MAX_ATTEMPTS", "10"))
+# Exponential backoff between attempts: base * 2**(attempt-1), capped by max.
+OUTBOX_RETRY_BASE_DELAY = float(os.environ.get("OUTBOX_RETRY_BASE_DELAY", "5"))
+OUTBOX_RETRY_MAX_DELAY = float(os.environ.get("OUTBOX_RETRY_MAX_DELAY", "300"))
+
+# --- Idempotency of POST /api/tickets ---------------------------------------------
+# How long a key keeps returning the saved result.
+IDEMPOTENCY_KEY_TTL_HOURS = float(os.environ.get("IDEMPOTENCY_KEY_TTL_HOURS", "24"))
 
 # --- Celery (PostgreSQL is used as the broker via the SQLAlchemy transport) --
 def _broker_url(db):
@@ -139,6 +166,10 @@ CELERY_BEAT_SCHEDULE = {
             minute=0,
         ),
     },
+    "purge-idempotency-keys-hourly": {
+        "task": "src.events.tasks.purge_idempotency_keys",
+        "schedule": crontab(minute=15),
+    },
 }
 
 LOGGING = {
@@ -152,3 +183,11 @@ LOGGING = {
     },
     "root": {"handlers": ["console"], "level": "INFO"},
 }
+
+# --- GlitchTip (Sentry-compatible error tracking) ---------------------------------
+# The DSN appears in the environment after provisioning on the portal.
+SENTRY_DSN = os.environ.get("SENTRY_DSN") or os.environ.get("GLITCHTIP_DSN", "")
+SENTRY_ENVIRONMENT = os.environ.get("SENTRY_ENVIRONMENT", "production")
+# Enables GET /api/debug/sentry-error to check that errors reach GlitchTip.
+SENTRY_DEBUG_ENDPOINT = env_bool("SENTRY_DEBUG_ENDPOINT")
+init_sentry(SENTRY_DSN, environment=SENTRY_ENVIRONMENT)

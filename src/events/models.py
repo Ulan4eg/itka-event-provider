@@ -1,4 +1,7 @@
+import uuid
+
 from django.db import models
+from django.utils import timezone
 
 
 class EventStatus:
@@ -78,3 +81,64 @@ class SyncMetadata(models.Model):
     )
     started_at = models.DateTimeField(null=True, blank=True)
     last_error = models.TextField(blank=True, default="")
+
+
+class IdempotencyKey(models.Model):
+    """Result of a successful ``POST /api/tickets`` made with an idempotency key.
+
+    The key is the primary key: that gives uniqueness and a fast lookup. The
+    request fingerprint lets us tell a retry from a different request that
+    reuses the same key (409).
+    """
+
+    key = models.CharField(max_length=255, primary_key=True)
+    request_hash = models.CharField(max_length=64)
+    ticket = models.ForeignKey(
+        Ticket, on_delete=models.CASCADE, related_name="idempotency_keys"
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    def __str__(self):
+        return f"{self.key} -> {self.ticket_id}"
+
+
+class OutboxMessage(models.Model):
+    """Transactional outbox: side effects that must not be lost.
+
+    A row is written in the same DB transaction as the business data and is
+    delivered later by the outbox worker (see ``outbox.py``).
+    """
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        SENT = "sent", "Sent"
+        # Gave up: attempts exhausted or the receiver rejected the data for good.
+        FAILED = "failed", "Failed"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    event_type = models.CharField(max_length=64)
+    payload = models.JSONField()
+    status = models.CharField(
+        max_length=16, choices=Status.choices, default=Status.PENDING
+    )
+    attempts = models.PositiveIntegerField(default=0)
+    last_error = models.TextField(blank=True, default="")
+    # Retry with backoff: the worker takes a row only when this time has come.
+    next_attempt_at = models.DateTimeField(default=timezone.now)
+    created_at = models.DateTimeField(auto_now_add=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "outbox"
+        indexes = [
+            # Partial index: only the rows still waiting are indexed, so
+            # picking the next batch stays cheap however many rows are "sent".
+            models.Index(
+                fields=["next_attempt_at"],
+                condition=models.Q(status="pending"),
+                name="outbox_pending_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.event_type} {self.id} ({self.status})"
