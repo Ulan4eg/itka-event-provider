@@ -183,20 +183,28 @@ def process_batch(limit=None):
     """
     limit = limit or settings.OUTBOX_BATCH_SIZE
     handled = 0
-    try:
-        while handled < limit:
-            result = process_next()
-            if result is None:
-                break
-            handled += 1
-            if result is False:
-                break
-    finally:
-        close_old_connections()
+    while handled < limit:
+        result = process_next()
+        if result is None:
+            break
+        handled += 1
+        if result is False:
+            break
     return handled
 
 
 # --- the worker --------------------------------------------------------------
+def _run_batch():
+    """One worker iteration, executed in the worker's own thread."""
+    try:
+        return process_batch()
+    finally:
+        # Drop stale/broken connections of this long-living thread. Not done in
+        # process_batch itself: inside an open transaction (tests) it would
+        # close the connection.
+        close_old_connections()
+
+
 async def run_worker(stop=None):
     """Poll the outbox until ``stop`` (an ``asyncio.Event``) is set.
 
@@ -209,7 +217,7 @@ async def run_worker(stop=None):
     try:
         while stop is None or not stop.is_set():
             try:
-                handled = await loop.run_in_executor(executor, process_batch)
+                handled = await loop.run_in_executor(executor, _run_batch)
             except Exception:
                 logger.exception("Outbox worker iteration failed")
                 handled = 0
