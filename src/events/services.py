@@ -1,17 +1,21 @@
 """Business logic of the aggregator. Views only call functions from here."""
 
+import hashlib
+import json
 import logging
 from contextlib import contextmanager
+from datetime import timedelta
 
 from django.conf import settings
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.db import connection, transaction
 from django.db.models import F
 from django.utils import timezone
 
-from .exceptions import BusinessError, NotFoundError, UpstreamError
-from .models import Event, EventStatus, Ticket
+from .exceptions import BusinessError, ConflictError, NotFoundError, UpstreamError
+from .models import Event, EventStatus, IdempotencyKey, Ticket
+from .outbox import enqueue_ticket_purchased
 from .provider.client import EventsProviderClient
 from .provider.exceptions import (
     ProviderBadRequestError,
@@ -87,7 +91,8 @@ def get_available_seats(event_id):
     return _load_seats(get_event(event_id), use_cache=True)
 
 
-def register_ticket(event_id, first_name, last_name, email, seat):
+def _register_ticket(event_id, first_name, last_name, email, seat):
+    """Validate, register at the provider, save the ticket and the outbox row."""
     event = get_event(event_id)
     if event.status != EventStatus.PUBLISHED:
         raise BusinessError("Registration is not open for this event.")
@@ -127,8 +132,89 @@ def register_ticket(event_id, first_name, last_name, email, seat):
         Event.objects.filter(pk=event.pk).update(
             number_of_visitors=F("number_of_visitors") + 1
         )
+        # Transactional outbox: the notification is saved atomically with the
+        # ticket and is delivered later by the outbox worker.
+        enqueue_ticket_purchased(ticket)
     cache.delete(_seats_cache_key(event.id))
     return ticket
+
+
+def _request_fingerprint(event_id, first_name, last_name, email, seat):
+    """Stable hash of the request data, to tell a retry from a different request."""
+    data = {
+        "event_id": str(event_id),
+        "first_name": first_name,
+        "last_name": last_name,
+        "email": email,
+        "seat": seat,
+    }
+    raw = json.dumps(data, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def _lock_idempotency_key(key):
+    """Serialise concurrent requests with the same key until the transaction ends.
+
+    Without it two parallel requests could both call the provider before either
+    of them stores the key. PostgreSQL only; sqlite (local dev) is single-writer.
+    """
+    if connection.vendor != "postgresql":
+        return
+    digest = hashlib.sha256(key.encode()).digest()
+    lock_id = int.from_bytes(digest[:8], "big", signed=True)
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT pg_advisory_xact_lock(%s)", [lock_id])
+
+
+def _idempotency_cutoff():
+    return timezone.now() - timedelta(hours=settings.IDEMPOTENCY_KEY_TTL_HOURS)
+
+
+def register_ticket(
+    event_id, first_name, last_name, email, seat, idempotency_key=None
+):
+    """Register a participant. Returns the ticket.
+
+    With ``idempotency_key`` a repeated request returns the same ticket without
+    touching the provider; the same key with other data raises ``ConflictError``.
+    Nothing is stored for the key if the registration fails.
+    """
+    if not idempotency_key:
+        return _register_ticket(event_id, first_name, last_name, email, seat)
+
+    fingerprint = _request_fingerprint(event_id, first_name, last_name, email, seat)
+    with transaction.atomic():
+        _lock_idempotency_key(idempotency_key)
+        saved = (
+            IdempotencyKey.objects.select_related("ticket")
+            .filter(pk=idempotency_key)
+            .first()
+        )
+        if saved is not None and saved.created_at < _idempotency_cutoff():
+            saved.delete()  # the key is past its retention period
+            saved = None
+        if saved is not None:
+            if saved.request_hash != fingerprint:
+                raise ConflictError(
+                    "Idempotency key was already used with different data."
+                )
+            return saved.ticket
+
+        # If anything below fails, the transaction is rolled back and the key is
+        # not stored, so the client can retry with the same key.
+        ticket = _register_ticket(event_id, first_name, last_name, email, seat)
+        IdempotencyKey.objects.create(
+            key=idempotency_key, request_hash=fingerprint, ticket=ticket
+        )
+    return ticket
+
+
+def purge_expired_idempotency_keys():
+    """Delete keys older than the retention period. Returns how many."""
+    deleted, _ = IdempotencyKey.objects.filter(
+        created_at__lt=_idempotency_cutoff()
+    ).delete()
+    return deleted
 
 
 def cancel_ticket(ticket_id):

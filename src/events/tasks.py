@@ -5,6 +5,7 @@ from celery import shared_task
 from django.utils import timezone
 
 from .models import SyncMetadata
+from .services import purge_expired_idempotency_keys
 from .sync import run_sync
 
 logger = logging.getLogger(__name__)
@@ -16,6 +17,13 @@ POLL_INTERVAL = 0.5
 def sync_events():
     meta = run_sync()
     return meta.sync_status
+
+
+@shared_task(name="src.events.tasks.purge_idempotency_keys")
+def purge_idempotency_keys():
+    deleted = purge_expired_idempotency_keys()
+    logger.info("Purged %s expired idempotency key(s)", deleted)
+    return deleted
 
 
 def _finished_since(started):

@@ -7,6 +7,9 @@ UUID = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]
 # Every route works with and without trailing slash (spec uses no slash).
 urlpatterns = [
     re_path(r"^health/?$", views.HealthView.as_view(), name="health"),
+    re_path(
+        r"^debug/sentry-error/?$", views.SentryDebugView.as_view(), name="sentry-debug"
+    ),
     re_path(r"^sync/trigger/?$", views.SyncTriggerView.as_view(), name="sync-trigger"),
     re_path(r"^events/?$", views.EventListView.as_view(), name="event-list"),
     re_path(

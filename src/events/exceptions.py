@@ -14,6 +14,12 @@ class NotFoundError(APIException):
     default_code = "not_found"
 
 
+class ConflictError(APIException):
+    status_code = status.HTTP_409_CONFLICT
+    default_detail = "Request conflicts with the current state."
+    default_code = "conflict"
+
+
 class UpstreamError(APIException):
     status_code = status.HTTP_502_BAD_GATEWAY
     default_detail = "Events Provider is temporarily unavailable."
